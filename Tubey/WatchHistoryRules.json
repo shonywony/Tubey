@@ -1,0 +1,26 @@
+[
+  {
+    "trigger": {
+      "url-filter": "^[^:]+://+([^:/]+\\.)?youtube\\.com/api/stats/watchtime"
+    },
+    "action": {
+      "type": "block"
+    }
+  },
+  {
+    "trigger": {
+      "url-filter": "^[^:]+://+([^:/]+\\.)?youtube\\.com/api/stats/playback"
+    },
+    "action": {
+      "type": "block"
+    }
+  },
+  {
+    "trigger": {
+      "url-filter": "^[^:]+://+([^:/]+\\.)?youtube\\.com/api/stats/delayplay"
+    },
+    "action": {
+      "type": "block"
+    }
+  }
+]

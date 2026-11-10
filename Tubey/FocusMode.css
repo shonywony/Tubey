@@ -1,0 +1,28 @@
+/* Focus mode: hides recommendations so YouTube only shows what you came for.
+   YouTube changes its page structure from time to time, so selectors here may need updating. */
+
+/* Home page recommendations (Tubey also sends Home to your Subscriptions) */
+ytd-browse[page-subtype="home"] ytd-rich-grid-renderer,
+
+/* "Up next" / related videos beside and below the player (playlists stay visible) */
+ytd-watch-flexy #secondary #related,
+ytd-watch-flexy #below #related,
+ytd-watch-next-secondary-results-renderer,
+
+/* End-screen cards and the suggestion wall when a video finishes */
+.ytp-ce-element,
+.ytp-endscreen-content,
+.html5-endscreen,
+.ytp-fullscreen-grid,
+.ytp-fullscreen-grid-stills-container,
+.ytp-autonav-endscreen-countdown-overlay,
+.ytp-suggested-action,
+
+/* Recommendation shelves mixed into search results */
+ytd-search ytd-shelf-renderer,
+ytd-search ytd-horizontal-card-list-renderer,
+
+/* Explore / Trending section in the left sidebar */
+ytd-guide-section-renderer:has(a[href="/feed/trending"]) {
+  display: none !important;
+}

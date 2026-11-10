@@ -1,0 +1,9 @@
+# macOS
+.DS_Store
+Icon?
+
+# Xcode: personal window layouts, breakpoints and build output
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
