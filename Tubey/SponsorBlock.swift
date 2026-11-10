@@ -21,7 +21,11 @@ enum SponsorBlock {
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
             // 404 just means no segments have been submitted for these videos.
-            guard (response as? HTTPURLResponse)?.statusCode == 200,
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if status != 200 && status != 404 {
+                print("Tubey: SponsorBlock server replied with status \(status)")
+            }
+            guard status == 200,
                   let videos = try JSONSerialization.jsonObject(with: data) as? [[String: Any]],
                   let video = videos.first(where: { ($0["videoID"] as? String) == videoID }),
                   let segments = video["segments"] as? [[String: Any]] else {

@@ -129,7 +129,7 @@ final class BandwidthMonitor: NSObject, ObservableObject, WKScriptMessageHandler
     }
 }
 
-/// The small "↓ 4.2 MB/s · 312 MB" badge in the bottom-right corner. Click it to reset the total.
+/// The small "↓ 4.2 MB/s · Session 312 MB" badge in the bottom-right corner. Click it to reset the total.
 struct BandwidthBadge: View {
     @ObservedObject var monitor: BandwidthMonitor
     /// The app's own colour (the same as its top bar).
@@ -143,7 +143,7 @@ struct BandwidthBadge: View {
                 Text(BandwidthMonitor.format(monitor.bytesPerSecond) + "/s")
                 Text("·")
                     .foregroundStyle(.white.opacity(0.6))
-                Text(BandwidthMonitor.format(monitor.sessionBytes))
+                Text("Session " + BandwidthMonitor.format(monitor.sessionBytes))
                     .foregroundStyle(.white.opacity(0.8))
             }
             .font(.system(size: 11, weight: .medium).monospacedDigit())
@@ -155,6 +155,6 @@ struct BandwidthBadge: View {
             .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
         }
         .buttonStyle(.plain)
-        .help("Data this app has downloaded since it opened (close estimate). Click to reset the total.")
+        .help("Left: current download speed. Right: total data used since the app opened (a close estimate). It starts again from zero each time you open the app, or click to reset it now.")
     }
 }

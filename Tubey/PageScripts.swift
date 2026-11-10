@@ -12,11 +12,14 @@ enum PageScripts {
         };
         redirectShort();
         window.addEventListener('yt-navigate-finish', redirectShort);
+        document.addEventListener('yt-navigate-finish', redirectShort);
         window.addEventListener('popstate', redirectShort);
+        setInterval(redirectShort, 1000);
         """)
 
-    /// Hides recommendations (FocusMode.css), sends Home to Subscriptions, and turns off autoplay.
-    static let focusMode = styleScript(cssFile: "FocusMode", styleID: "tubey-focus-mode", extraJS: """
+    /// Hides recommendations (FocusMode.css), sends YouTube's Home feed to Subscriptions (it would be empty),
+    /// turns off autoplay, and opens videos in Theater mode.
+    static let hideRecommendations = styleScript(cssFile: "FocusMode", styleID: "tubey-focus-mode", extraJS: """
         const toSubscriptions = () => {
           if (location.pathname === '/') location.replace('/feed/subscriptions');
         };
@@ -24,13 +27,52 @@ enum PageScripts {
           const toggle = document.querySelector('.ytp-autonav-toggle-button[aria-checked="true"]');
           if (toggle) toggle.click();
         };
+        // With recommendations gone, switch videos to YouTube's Theater mode so the video fills the
+        // window width instead of leaving an empty column. Done once per video, so you can switch it back.
+        let theaterFor = null;
+        const useTheater = () => {
+          const id = location.pathname === '/watch' ? new URLSearchParams(location.search).get('v') : null;
+          if (!id || theaterFor === id) return;
+          const page = document.querySelector('ytd-watch-flexy');
+          const button = document.querySelector('#movie_player .ytp-size-button');
+          const video = document.querySelector('#movie_player video');
+          if (!page || !button || !video || video.readyState < 1) return;
+          theaterFor = id;
+          if (page.hasAttribute('theater') || page.hasAttribute('fullscreen')) return;
+          button.click();
+          try { localStorage.setItem('tubeyTheater', '1'); } catch (e) {}
+        };
+        setInterval(useTheater, 1000);
         toSubscriptions();
         setTimeout(autoplayOff, 3000);
-        window.addEventListener('yt-navigate-finish', () => {
+        const onNavigate = () => {
           toSubscriptions();
           setTimeout(autoplayOff, 1500);
-        });
+        };
+        window.addEventListener('yt-navigate-finish', onNavigate);
+        document.addEventListener('yt-navigate-finish', onNavigate);
         """)
+
+    /// Runs when Hide Recommendations is off: if it switched videos to Theater mode, switch back once.
+    static let leaveFocusTheater = """
+        (() => {
+          if (window.__tubeyLeaveTheater) return;
+          window.__tubeyLeaveTheater = true;
+          const timer = setInterval(() => {
+            let flagged = false;
+            try { flagged = localStorage.getItem('tubeyTheater') === '1'; } catch (e) {}
+            if (!flagged) { clearInterval(timer); return; }
+            if (location.pathname !== '/watch') return;
+            const page = document.querySelector('ytd-watch-flexy');
+            const button = document.querySelector('#movie_player .ytp-size-button');
+            const video = document.querySelector('#movie_player video');
+            if (!page || !button || !video || video.readyState < 1) return;
+            if (page.hasAttribute('theater') && !page.hasAttribute('fullscreen')) button.click();
+            try { localStorage.removeItem('tubeyTheater'); } catch (e) {}
+            clearInterval(timer);
+          }, 1000);
+        })();
+        """
 
     /// Asks the app for SponsorBlock segments for each video, then jumps over them as they come up.
     static let sponsorBlock = """
@@ -99,8 +141,13 @@ enum PageScripts {
           };
 
           window.addEventListener('yt-navigate-finish', load);
+          document.addEventListener('yt-navigate-finish', load);
           document.addEventListener('DOMContentLoaded', load);
-          setInterval(attach, 2000);
+          // Backup: check once a second whether YouTube has switched to a different video.
+          setInterval(() => {
+            attach();
+            if (videoID() !== currentID) load();
+          }, 1000);
         })();
         """
 
@@ -126,6 +173,7 @@ enum PageScripts {
               addStyle();
               document.addEventListener('DOMContentLoaded', addStyle);
               window.addEventListener('yt-navigate-finish', addStyle);
+              document.addEventListener('yt-navigate-finish', addStyle);
             \(extraJS)
             })();
             """

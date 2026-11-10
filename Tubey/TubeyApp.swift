@@ -12,6 +12,8 @@ struct TubeyApp: App {
         }
         .defaultSize(width: 1280, height: 800)
         .commands {
+            HelpCommands()
+
             // Single-window app: hide "New Window".
             CommandGroup(replacing: .newItem) {}
 
@@ -37,35 +39,51 @@ struct TubeyApp: App {
                 Button("Sign In with Google…") { browser.signIn() }
             }
 
-            CommandGroup(after: .toolbar) {
-                Toggle("Show Bandwidth Monitor", isOn: $browser.showBandwidth)
-                Toggle("Hide Shorts", isOn: $browser.hideShorts)
-                Toggle("Focus Mode", isOn: $browser.focusMode)
-                    .keyboardShortcut("f", modifiers: [.command, .shift])
-            }
-
-            CommandMenu("Privacy") {
-                Toggle("Block Watch-Time Tracking (turns off watch history)", isOn: $browser.blockWatchHistory)
-            }
-
             CommandMenu("Video") {
                 Button("Picture in Picture") { browser.togglePictureInPicture() }
                     .keyboardShortcut("p", modifiers: [.command, .shift])
-
-                Divider()
-
-                Toggle("Skip Sponsors (SponsorBlock)", isOn: $browser.skipSponsors)
-                Toggle("Also Skip Intros & Outros", isOn: $browser.skipIntrosAndOutros)
-                    .disabled(!browser.skipSponsors)
             }
+            // Everything you can switch on and off lives in the toolbar's Features and Add-ons menus.
+        }
+
+        // Explains every feature. Help → Tubey Help (⌘?).
+        Window("Tubey Help", id: "help") {
+            HelpView()
+        }
+        .defaultSize(width: 860, height: 620)
+
+        // The mini player in the menu bar (Add-ons → Menu Bar Player turns it off).
+        // Only pass real changes back: SwiftUI re-sends the current value while it draws, and saving
+        // that would redraw the app again and again.
+        MenuBarExtra(isInserted: Binding(
+            get: { browser.showMenuBarPlayer },
+            set: { if browser.showMenuBarPlayer != $0 { browser.showMenuBarPlayer = $0 } }
+        )) {
+            MiniPlayerView(nowPlaying: browser.nowPlaying)
+                .environmentObject(browser)
+        } label: {
+            MenuBarIcon(nowPlaying: browser.nowPlaying)
+        }
+        .menuBarExtraStyle(.window)
+    }
+}
+
+/// Replaces the standard Help menu item with Tubey's own Help window.
+struct HelpCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .help) {
+            Button("Tubey Help") { openWindow(id: "help") }
+                .keyboardShortcut("?", modifiers: .command)
         }
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    // Always use dark mode, whatever your Mac is set to.
+    // Use the saved appearance (Dark unless you've picked Light or Match System).
     func applicationWillFinishLaunching(_ notification: Notification) {
-        NSApp.appearance = NSAppearance(named: .darkAqua)
+        NSApp.appearance = AppAppearance.saved.nsAppearance
     }
 
     // Quit when the window closes, so audio doesn't keep playing in the background.

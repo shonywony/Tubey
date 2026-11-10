@@ -2,6 +2,42 @@ import AppKit
 import SwiftUI
 import WebKit
 
+/// Dark, Light, or follow the Mac's own setting.
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case dark, light, system
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .dark: "Dark"
+        case .light: "Light"
+        case .system: "Match System"
+        }
+    }
+
+    /// The saved choice (Dark until you pick something else).
+    static var saved: AppAppearance {
+        AppAppearance(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "") ?? .dark
+    }
+
+    /// nil means "follow the Mac".
+    var nsAppearance: NSAppearance? {
+        switch self {
+        case .dark: NSAppearance(named: .darkAqua)
+        case .light: NSAppearance(named: .aqua)
+        case .system: nil
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .dark: .dark
+        case .light: .light
+        case .system: nil
+        }
+    }
+}
+
 /// Owns the web view and exposes its state to the UI.
 @MainActor
 final class BrowserModel: NSObject, ObservableObject {
@@ -27,6 +63,14 @@ final class BrowserModel: NSObject, ObservableObject {
     let bandwidth = BandwidthMonitor()
 
     /// On by default. Shows the bandwidth badge in the bottom-right corner (the counting always runs).
+    /// Dark by default. YouTube follows this when its own Appearance setting is "Use device theme".
+    @Published var appearance = AppAppearance.saved {
+        didSet {
+            UserDefaults.standard.set(appearance.rawValue, forKey: "appearance")
+            applyAppearance()
+        }
+    }
+
     @Published var showBandwidth = UserDefaults.standard.object(forKey: "showBandwidth") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showBandwidth, forKey: "showBandwidth") }
     }
@@ -38,6 +82,16 @@ final class BrowserModel: NSObject, ObservableObject {
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
     @Published private(set) var isLoading = false
+
+    /// On by default. Blocks Google's ad and analytics trackers (DoubleClick, Google Analytics, Tag Manager,
+    /// ad services) and cookies from any other site (BlockRules.json).
+    @Published var blockTrackers = BrowserModel.setting("blockTrackers", default: true) {
+        didSet {
+            UserDefaults.standard.set(blockTrackers, forKey: "blockTrackers")
+            applyRules()
+            webView.reload()
+        }
+    }
 
     /// Off by default: blocking watch-time pings also stops watch history and "resume where you left off".
     @Published var blockWatchHistory = UserDefaults.standard.bool(forKey: "blockWatchHistory") {
@@ -55,9 +109,17 @@ final class BrowserModel: NSObject, ObservableObject {
         didSet { save(hideShorts, "hideShorts") }
     }
 
-    /// On by default. Hides recommendations, opens to Subscriptions and turns off autoplay.
+    /// On by default. Tubey opens on (and Home goes to) your Subscriptions page.
     @Published var focusMode = BrowserModel.setting("focusMode", default: true) {
-        didSet { save(focusMode, "focusMode") }
+        didSet { UserDefaults.standard.set(focusMode, forKey: "focusMode") }
+    }
+
+    /// Hides recommendations, sends YouTube's Home feed to Subscriptions, turns off autoplay and uses
+    /// Theater mode. Starts the same as Focus Mode did before the two were split.
+    @Published var hideRecommendations = BrowserModel.setting(
+        "hideRecommendations", default: BrowserModel.setting("focusMode", default: true)
+    ) {
+        didSet { save(hideRecommendations, "hideRecommendations") }
     }
 
     /// On by default. Skips sponsors, self-promotion and subscribe reminders using SponsorBlock.
@@ -68,6 +130,65 @@ final class BrowserModel: NSObject, ObservableObject {
     /// Off by default. Also skips intros and outros (only applies when skipSponsors is on).
     @Published var skipIntrosAndOutros = BrowserModel.setting("skipIntrosAndOutros", default: false) {
         didSet { save(skipIntrosAndOutros, "skipIntrosAndOutros") }
+    }
+
+    /// On by default. Shows dislike counts from the Return YouTube Dislike community service.
+    @Published var showDislikes = BrowserModel.setting("showDislikes", default: true) {
+        didSet { save(showDislikes, "showDislikes") }
+    }
+
+    /// On by default. Hides YouTube Playables (mini-games).
+    @Published var hidePlayables = BrowserModel.setting("hidePlayables", default: true) {
+        didSet { save(hidePlayables, "hidePlayables") }
+    }
+
+    /// On by default. Swaps clickbait titles and thumbnails for DeArrow community ones.
+    @Published var showDeArrow = BrowserModel.setting("showDeArrow", default: true) {
+        didSet { save(showDeArrow, "showDeArrow") }
+    }
+
+    /// The video that's playing (for the menu bar player and the Picture in Picture button).
+    let nowPlaying = NowPlaying()
+
+    /// On by default. The mini player in the menu bar.
+    @Published var showMenuBarPlayer = BrowserModel.setting("showMenuBarPlayer", default: true) {
+        didSet { UserDefaults.standard.set(showMenuBarPlayer, forKey: "showMenuBarPlayer") }
+    }
+
+    /// Clean view switches, off by default.
+    @Published var hideComments = BrowserModel.setting("hideComments", default: false) {
+        didSet { save(hideComments, "hideComments") }
+    }
+    @Published var hideEndCards = BrowserModel.setting("hideEndCards", default: false) {
+        didSet { save(hideEndCards, "hideEndCards") }
+    }
+    @Published var hideLiveChat = BrowserModel.setting("hideLiveChat", default: false) {
+        didSet { save(hideLiveChat, "hideLiveChat") }
+    }
+    /// On by default. Hides the "Latest / All subscriptions" bar so your Subscriptions videos sit higher.
+    @Published var hideFeedHeader = BrowserModel.setting("hideFeedHeader", default: true) {
+        didSet { save(hideFeedHeader, "hideFeedHeader") }
+    }
+
+    /// On by default. Answers YouTube's "Video paused. Continue watching?" prompt for you.
+    @Published var autoDismissStillWatching = BrowserModel.setting("autoDismissStillWatching", default: true) {
+        didSet { save(autoDismissStillWatching, "autoDismissStillWatching") }
+    }
+
+    /// Speed and quality applied when each video starts.
+    @Published var defaultSpeed = PlaybackSpeed.saved {
+        didSet {
+            UserDefaults.standard.set(defaultSpeed.rawValue, forKey: "defaultSpeed")
+            applyUserScripts()
+            webView.reload()
+        }
+    }
+    @Published var videoQuality = VideoQuality.saved {
+        didSet {
+            UserDefaults.standard.set(videoQuality.rawValue, forKey: "videoQuality")
+            applyUserScripts()
+            webView.reload()
+        }
     }
 
     nonisolated private static func setting(_ key: String, default value: Bool) -> Bool {
@@ -102,11 +223,15 @@ final class BrowserModel: NSObject, ObservableObject {
         webView.customUserAgent =
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
         webView.allowsBackForwardNavigationGestures = true
-        webView.allowsMagnification = true
+        // No zooming: pinch, smart zoom (two-finger double-tap) and page zoom are all off,
+        // so YouTube always fits the window at its normal size.
+        webView.allowsMagnification = false
+        webView.magnification = 1
+        webView.pageZoom = 1
         // Force dark mode: YouTube's default "device theme" follows this,
         // and the black background stops white flashes while pages load.
-        webView.appearance = NSAppearance(named: .darkAqua)
-        webView.underPageBackgroundColor = .black
+        webView.appearance = AppAppearance.saved.nsAppearance
+        webView.underPageBackgroundColor = AppAppearance.saved == .light ? .white : .black
         // Don't paint a white background before YouTube loads, so the dark window shows through instead.
         // This WebKit setting isn't public, so only set it if this macOS version has it.
         if webView.responds(to: NSSelectorFromString("_setDrawsBackground:")) {
@@ -121,6 +246,15 @@ final class BrowserModel: NSObject, ObservableObject {
         // Lets the SponsorBlock page script ask the app to look up segments.
         webView.configuration.userContentController
             .addScriptMessageHandler(self, contentWorld: .page, name: "tubeySponsorBlock")
+        // Lets the dislikes page script ask the app to look up a video's dislike count.
+        webView.configuration.userContentController
+            .addScriptMessageHandler(self, contentWorld: .page, name: "tubeyDislikes")
+        // Lets the DeArrow page script ask the app for community titles and thumbnails.
+        webView.configuration.userContentController
+            .addScriptMessageHandler(self, contentWorld: .page, name: "tubeyDeArrow")
+        // The playing video, for the menu bar player and the Picture in Picture button.
+        webView.configuration.userContentController.add(nowPlaying, name: "tubeyNowPlaying")
+        nowPlaying.webView = webView
 
         observations = [
             webView.observe(\.canGoBack) { [weak self] _, _ in
@@ -148,6 +282,9 @@ final class BrowserModel: NSObject, ObservableObject {
             trackerRules = await Self.compileRules(named: "BlockRules")
             watchHistoryRules = await Self.compileRules(named: "WatchHistoryRules")
             applyRules()
+
+            // Make YouTube's own theme match Tubey's Appearance setting before the first page loads.
+            await syncYouTubeTheme()
 
             let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
             let signedIn = cookies.contains {
@@ -198,6 +335,66 @@ final class BrowserModel: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Appearance
+
+    private func applyAppearance() {
+        NSApp.appearance = appearance.nsAppearance
+        webView.appearance = appearance.nsAppearance
+        webView.underPageBackgroundColor = appearance == .light ? .white : .black
+        // Switch YouTube's own theme setting, then reload so the page comes back in the new theme.
+        // (The page script double-checks on load and fixes it if YouTube put its old choice back.)
+        applyUserScripts()
+        themeTask?.cancel()
+        themeTask = Task {
+            await syncYouTubeTheme()
+            guard !Task.isCancelled else { return }
+            webView.reload()
+        }
+    }
+
+    /// The latest theme switch, so clicking quickly between modes doesn't leave an older one finishing last.
+    private var themeTask: Task<Void, Never>?
+
+    /// YouTube keeps its own Appearance choice in the "f6" field of its PREF cookie:
+    /// the 0x400 flag means Dark, 0x80000 means Light, and neither means "Use device theme".
+    /// This sets that flag to match Tubey's Appearance setting, keeping YouTube's other settings.
+    private func syncYouTubeTheme() async {
+        let store = webView.configuration.websiteDataStore.httpCookieStore
+        let prefs = await store.allCookies().filter { $0.name == "PREF" && $0.domain.hasSuffix("youtube.com") }
+        // YouTube can end up with more than one PREF cookie (e.g. ".youtube.com" and "www.youtube.com").
+        // Keep the main one and remove the rest, so an old copy can't override the new theme.
+        let existing = prefs.first { $0.domain == ".youtube.com" } ?? prefs.first
+        for extra in prefs where extra.domain != ".youtube.com" || extra !== existing {
+            await store.deleteCookie(extra)
+        }
+        var fields: [(String, String)] = (existing?.value ?? "").split(separator: "&").compactMap { part in
+            let pair = part.split(separator: "=", maxSplits: 1).map(String.init)
+            return pair.count == 2 ? (pair[0], pair[1]) : nil
+        }
+        var flags = UInt64(fields.first { $0.0 == "f6" }?.1 ?? "0", radix: 16) ?? 0
+        flags &= ~UInt64(0x400 | 0x80000)
+        switch appearance {
+        case .dark: flags |= 0x400
+        case .light: flags |= 0x80000
+        case .system: break
+        }
+        fields.removeAll { $0.0 == "f6" }
+        if flags != 0 { fields.insert(("f6", String(flags, radix: 16)), at: 0) }
+        guard !fields.isEmpty else {
+            if let existing { await store.deleteCookie(existing) }
+            return
+        }
+        let properties: [HTTPCookiePropertyKey: Any] = [
+            .name: "PREF",
+            .value: fields.map { "\($0.0)=\($0.1)" }.joined(separator: "&"),
+            .domain: ".youtube.com",
+            .path: "/",
+            .secure: "TRUE",
+            .expires: Date().addingTimeInterval(60 * 60 * 24 * 400),
+        ]
+        if let cookie = HTTPCookie(properties: properties) { await store.setCookie(cookie) }
+    }
+
     // MARK: - Page features (Hide Shorts, Focus mode, SponsorBlock)
 
     private func applyUserScripts() {
@@ -208,8 +405,18 @@ final class BrowserModel: NSObject, ObservableObject {
         )
         var scripts: [String?] = []
         if hideShorts { scripts.append(PageScripts.hideShorts) }
-        if focusMode { scripts.append(PageScripts.focusMode) }
+        scripts.append(hideRecommendations ? PageScripts.hideRecommendations : PageScripts.leaveFocusTheater)
         if skipSponsors { scripts.append(PageScripts.sponsorBlock) }
+        scripts.append(TubeyFeatures.themeScript(mode: appearance.rawValue))
+        if showDislikes { scripts.append(TubeyFeatures.dislikesScript) }
+        if showDeArrow { scripts.append(DeArrow.pageScript) }
+        if hidePlayables { scripts.append(TubeyFeatures.hidePlayablesScript) }
+        scripts.append(NowPlaying.pageScript)
+        scripts.append(TubeyFeatures.cleanViewScript(
+            hideComments: hideComments, hideEndCards: hideEndCards, hideLiveChat: hideLiveChat,
+            hideFeedHeader: hideFeedHeader))
+        scripts.append(TubeyFeatures.playerTweaksScript(
+            speed: defaultSpeed.rawValue, quality: videoQuality.rawValue, autoDismiss: autoDismissStillWatching))
         for case let source? in scripts {
             controller.addUserScript(
                 WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
@@ -231,7 +438,7 @@ final class BrowserModel: NSObject, ObservableObject {
     private func applyRules() {
         let controller = webView.configuration.userContentController
         controller.removeAllContentRuleLists()
-        if let trackerRules { controller.add(trackerRules) }
+        if blockTrackers, let trackerRules { controller.add(trackerRules) }
         if blockWatchHistory, let watchHistoryRules { controller.add(watchHistoryRules) }
     }
 
@@ -280,21 +487,41 @@ final class BrowserModel: NSObject, ObservableObject {
     }
 }
 
-// MARK: - SponsorBlock bridge
+// MARK: - SponsorBlock and dislikes bridge
 
 extension BrowserModel: WKScriptMessageHandlerWithReply {
-    /// Called by the page script with a video ID; replies with the segments to skip.
+    /// Called by the page scripts with a video ID; replies with the segments to skip,
+    /// or the dislike count.
     func userContentController(
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) async -> (Any?, String?) {
-        guard message.name == "tubeySponsorBlock", skipSponsors,
-              let videoID = message.body as? String else {
+        if message.name == "tubeyDeArrow" {
+            guard showDeArrow, let ids = message.body as? [String], !ids.isEmpty else { return ([String: Any](), nil) }
+            let branding = await DeArrow.branding(for: ids)
+            let titles = branding.values.compactMap { $0["title"] as? String }
+            print("Tubey: DeArrow checked \(ids.count) video(s): \(titles.count) new title(s), "
+                  + "\(branding.values.filter { $0["time"] != nil }.count) new thumbnail(s)"
+                  + (titles.isEmpty ? "" : " — e.g. “\(titles.prefix(3).joined(separator: "”, “"))”"))
+            return (branding, nil)
+        }
+
+        guard let videoID = message.body as? String else { return (nil, nil) }
+
+        if message.name == "tubeyDislikes" {
+            guard showDislikes, let dislikes = await ReturnYouTubeDislike.dislikes(videoID: videoID) else {
+                return (nil, nil)
+            }
+            return (dislikes, nil)
+        }
+
+        guard message.name == "tubeySponsorBlock", skipSponsors else {
             return ([[String: Any]](), nil)
         }
         var categories = ["sponsor", "selfpromo", "interaction"]
         if skipIntrosAndOutros { categories += ["intro", "outro"] }
         let segments = await SponsorBlock.segments(videoID: videoID, categories: categories)
+        print("Tubey: SponsorBlock found \(segments.count) segment(s) to skip in video \(videoID)")
         return (segments, nil)
     }
 }
